@@ -33,10 +33,9 @@ def create_disagreement(pair_verdict: dict, conn) -> dict:
     from app.memory import retain_transition
 
     fact_a = pair_verdict["fact_a"]
-    slug = pair_verdict.get("candidate_slug", fact_a["candidate_slug"])
+    slug = pair_verdict.get("candidate_slug") or fact_a.get("candidate_slug")
     comp = pair_verdict["competency"]
     kind = pair_verdict.get("kind", "CONTRADICTION")
-    fact_a = pair_verdict["fact_a"]
     fact_b = pair_verdict["fact_b"]
 
     # Sort interviewer IDs alphabetically for the unique key

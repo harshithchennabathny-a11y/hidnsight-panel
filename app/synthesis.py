@@ -286,7 +286,10 @@ def evaluate_candidate(slug: str, conn):
                 (pair["fact_a"]["fact_id"], pair["fact_b"]["fact_id"])
             ).fetchone()
             if existing:
-                pair_verdicts.append(dict(existing))
+                d_existing = dict(existing)
+                d_existing["fact_a"] = pair["fact_a"]
+                d_existing["fact_b"] = pair["fact_b"]
+                pair_verdicts.append(d_existing)
                 continue
 
             route = route_context(pair)

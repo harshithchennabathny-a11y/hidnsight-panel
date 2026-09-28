@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import uuid
@@ -30,6 +31,16 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 def _check_candidate_exists(slug: str, conn):
     if not conn.execute("SELECT 1 FROM candidates WHERE slug=?", (slug,)).fetchone():
         raise HTTPException(404, detail="Candidate not found")
+
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "app": "Panel API",
+        "docs_url": "/docs",
+        "endpoints": ["/candidates", "/submissions", "/docs"]
+    }
+
 
 @app.get("/candidates", response_model=list[CandidateListItem])
 def list_candidates():
@@ -205,3 +216,9 @@ def get_calibration():
     stats = get_calibration_stats(conn)
     conn.close()
     return stats
+
+# Serve static frontend build on root / if frontend/dist exists
+_dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+if os.path.exists(_dist_path):
+    app.mount("/", StaticFiles(directory=_dist_path, html=True), name="static")
+

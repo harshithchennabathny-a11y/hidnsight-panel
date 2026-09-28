@@ -5,10 +5,9 @@ All threshold values live here. Import everywhere; never hardcode elsewhere.
 PROVISIONAL values are marked — update after running scripts/calibrate_nli.py (Phase 4).
 """
 
-# NLI decision-table thresholds
-# Calibrated on 2026-09-28
-NLI_CONTRADICTION_HIGH: float = 0.07
-NLI_CONTRADICTION_LOW: float = 0.93
+# NLI decision-table thresholds (PROVISIONAL)
+NLI_CONTRADICTION_HIGH: float = 0.80
+NLI_CONTRADICTION_LOW: float = 0.40
 
 # Pair cap per competency (Stage 2, most-recent-round selection)
 MAX_PAIRS_PER_COMPETENCY: int = 15
