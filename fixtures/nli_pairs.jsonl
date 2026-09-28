@@ -1,0 +1,24 @@
+{"label": "contradiction", "claim_a": "The candidate has excellent system design skills.", "claim_b": "The candidate's system design skills are very poor."}
+{"label": "contradiction", "claim_a": "She struggled to write basic algorithms.", "claim_b": "She easily wrote complex algorithms with no struggle."}
+{"label": "contradiction", "claim_a": "Communication was clear and effective.", "claim_b": "Communication was confusing and ineffective."}
+{"label": "contradiction", "claim_a": "He demonstrated deep knowledge of concurrency.", "claim_b": "He showed a complete lack of understanding regarding concurrency."}
+{"label": "contradiction", "claim_a": "The candidate's code was clean, but they missed some edge cases.", "claim_b": "The candidate's code was extremely messy and poorly structured."}
+{"label": "contradiction", "claim_a": "She was somewhat hesitant when discussing database scaling.", "claim_b": "She was very confident and authoritative about database scaling."}
+{"label": "contradiction", "claim_a": "His approach to problem-solving was a bit slow.", "claim_b": "He solved the problems incredibly fast."}
+{"label": "contradiction", "claim_a": "The system architecture was mostly fine, but lacked detail.", "claim_b": "The system architecture was completely wrong."}
+{"label": "same_meaning", "claim_a": "The candidate writes very clean code.", "claim_b": "The candidate's code is highly readable and well-organized."}
+{"label": "same_meaning", "claim_a": "She communicated her thoughts clearly.", "claim_b": "Her explanations were easy to understand."}
+{"label": "same_meaning", "claim_a": "He has a strong grasp of Python.", "claim_b": "He is very proficient in Python programming."}
+{"label": "same_meaning", "claim_a": "The candidate was able to optimize the algorithm successfully.", "claim_b": "They successfully improved the performance of the algorithm."}
+{"label": "different_facets", "claim_a": "The candidate handled race conditions well.", "claim_b": "The candidate struggled with deadlock prevention."}
+{"label": "different_facets", "claim_a": "She designed a good data model.", "claim_b": "She missed the caching layer completely."}
+{"label": "different_facets", "claim_a": "He communicated the trade-offs well.", "claim_b": "He was slow to write the actual code."}
+{"label": "different_facets", "claim_a": "The candidate understands horizontal scaling.", "claim_b": "The candidate does not know much about database sharding."}
+{"label": "contradiction", "claim_a": "The candidate could be sharper on tradeoffs.", "claim_b": "The candidate showed excellent tradeoff reasoning."}
+{"label": "contradiction", "claim_a": "He sometimes failed to consider edge cases.", "claim_b": "He handled every single edge case flawlessly."}
+{"label": "contradiction", "claim_a": "Her knowledge of distributed systems is basic.", "claim_b": "She is an absolute expert in distributed systems."}
+{"label": "contradiction", "claim_a": "The candidate was a bit disorganized during the live coding.", "claim_b": "The candidate was extremely methodical during the live coding."}
+{"label": "ambiguous", "claim_a": "The candidate struggled with system design in round 1.", "claim_b": "The candidate performed very well in the system design round 2."}
+{"label": "ambiguous", "claim_a": "In the first round, his Python was rusty.", "claim_b": "In the final round, his Python skills were excellent."}
+{"label": "ambiguous", "claim_a": "She was nervous and uncommunicative initially.", "claim_b": "She communicated very clearly and confidently later on."}
+{"label": "ambiguous", "claim_a": "The candidate failed the initial coding task.", "claim_b": "The candidate aced the take-home coding assignment."}
