@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Any
 import os
 import uuid
 import re
@@ -8,9 +7,14 @@ from datetime import datetime
 
 from app.db import get_connection
 from app.enums import TaskContext
-from app.models import SubmissionRequest, FactOut, CompetencyAnalysis
+from app.models import (
+    SubmissionRequest, CandidateListItem, ResolutionRequest, 
+    fact_row_to_out
+)
 from app.ingest import extract_and_validate, build_fact_rows
 from app.memory import retain_fact
+from app.synthesis import briefing, evaluate_candidate
+from app.lifecycle import mark_probe_asked, submit_resolution, finalize, InvalidTransition
 
 app = FastAPI(title="Panel")
 
@@ -23,86 +27,181 @@ app.add_middleware(
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
+def _check_candidate_exists(slug: str, conn):
+    if not conn.execute("SELECT 1 FROM candidates WHERE slug=?", (slug,)).fetchone():
+        raise HTTPException(404, detail="Candidate not found")
+
+@app.get("/candidates", response_model=list[CandidateListItem])
+def list_candidates():
+    conn = get_connection()
+    rows = conn.execute("SELECT slug, display_name, status FROM candidates").fetchall()
+    result = []
+    for r in rows:
+        round_count = conn.execute(
+            "SELECT COUNT(DISTINCT round) FROM submissions WHERE candidate_slug=?", (r["slug"],)
+        ).fetchone()[0]
+        open_count = conn.execute(
+            "SELECT COUNT(*) FROM disagreements WHERE candidate_slug=? AND state NOT IN ('RESOLVED','STILL_OPEN')",
+            (r["slug"],)
+        ).fetchone()[0]
+        result.append(CandidateListItem(
+            slug=r["slug"], display_name=r["display_name"], status=r["status"],
+            round_count=round_count, open_disagreement_count=open_count
+        ))
+    return result
+
 @app.post("/submissions")
 def post_submission(req: SubmissionRequest):
-    # 1. Validate
     if not SLUG_RE.match(req.candidate_slug):
-        raise HTTPException(400, "candidate_slug must match ^[a-z0-9]+(-[a-z0-9]+)*$")
+        raise HTTPException(400, detail={"error": "candidate_slug must match ^[a-z0-9]+(-[a-z0-9]+)*$"})
     if not 1 <= req.round <= 10:
-        raise HTTPException(400, "round must be 1–10")
-    if req.task_context not in TaskContext.__members__:
-        raise HTTPException(400, f"task_context must be one of {list(TaskContext)}")
+        raise HTTPException(400, detail={"error": "round must be 1–10"})
     if not 20 <= len(req.feedback_text) <= 4000:
-        raise HTTPException(400, "feedback_text must be 20–4000 characters")
+        raise HTTPException(400, detail={"error": "feedback_text must be 20–4000 characters"})
 
     conn = get_connection()
 
-    # 2. Finalized check
     candidate = conn.execute("SELECT status FROM candidates WHERE slug=?", (req.candidate_slug,)).fetchone()
     if candidate and candidate["status"] == "finalized":
-        raise HTTPException(409, "Candidate is finalized; no more submissions accepted")
+        raise HTTPException(409, detail={"error": "Candidate is finalized"})
 
-    # 3. Duplicate check
-    dup = conn.execute("SELECT 1 FROM submissions WHERE candidate_slug=? AND interviewer_id=? AND round=?",
-        (req.candidate_slug, req.interviewer_id, req.round)).fetchone()
+    dup = conn.execute(
+        "SELECT 1 FROM submissions WHERE candidate_slug=? AND interviewer_id=? AND round=?",
+        (req.candidate_slug, req.interviewer_id, req.round)
+    ).fetchone()
     if dup:
-        raise HTTPException(409, f"Submission already exists for interviewer {req.interviewer_id} round {req.round}")
+        raise HTTPException(409, detail={"error": f"Submission already exists for {req.interviewer_id} round {req.round}"})
 
-    # 4. Create candidate row if slug is new
     if not candidate:
         now = datetime.utcnow().isoformat() + "Z"
-        conn.execute("INSERT INTO candidates (slug, display_name, status, created_at) VALUES (?, ?, ?, ?)",
+        conn.execute("INSERT INTO candidates (slug,display_name,status,created_at) VALUES (?,?,?,?)",
                      (req.candidate_slug, req.candidate_name, "open", now))
         conn.commit()
 
-    # 5. Extract and validate facts
     try:
-        extracted_facts = extract_and_validate(req.candidate_name, req.feedback_text)
+        raw_facts = extract_and_validate(req.candidate_name, req.feedback_text)
     except ValueError as e:
-        raise HTTPException(502, detail=str(e))
+        raise HTTPException(502, detail={"error": f"Fact extraction failed: {e}"})
 
-    # 6. Insert submission + fact rows in one transaction
     submission_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat() + "Z"
-    
-    fact_rows = build_fact_rows(
-        extracted_facts, submission_id, req.candidate_slug, req.interviewer_id, 
-        req.round, req.task_context, req.reviewed_others_notes
-    )
-
+    fact_rows = build_fact_rows(raw_facts, submission_id, req.candidate_slug,
+                                 req.interviewer_id, req.round,
+                                 req.task_context.value, req.reviewed_others_notes)
     with conn:
         conn.execute(
-            "INSERT INTO submissions (submission_id, candidate_slug, interviewer_id, interviewer_name, round, task_context, reviewed_others_notes, raw_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (submission_id, req.candidate_slug, req.interviewer_id, req.interviewer_name, req.round, req.task_context, int(req.reviewed_others_notes), req.feedback_text, now)
+            "INSERT INTO submissions VALUES (?,?,?,?,?,?,?,?,?)",
+            (submission_id, req.candidate_slug, req.interviewer_id, req.interviewer_name,
+             req.round, req.task_context.value, int(req.reviewed_others_notes),
+             req.feedback_text, now)
         )
-        
         for f in fact_rows:
             conn.execute(
-                "INSERT INTO facts (fact_id, submission_id, candidate_slug, interviewer_id, round, claim_normalized, evidence_span, competency, polarity, task_context, task_context_history, reviewed_others_notes, mirrored, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (f["fact_id"], f["submission_id"], f["candidate_slug"], f["interviewer_id"], f["round"], f["claim_normalized"], f["evidence_span"], f["competency"], f["polarity"], f["task_context"], f["task_context_history"], f["reviewed_others_notes"], f["mirrored"], f["created_at"])
+                "INSERT INTO facts VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (f["fact_id"], f["submission_id"], f["candidate_slug"], f["interviewer_id"],
+                 f["round"], f["claim_normalized"], f["evidence_span"], f["competency"],
+                 f["polarity"], f["task_context"], f["task_context_history"],
+                 f["reviewed_others_notes"], 0, f["created_at"])
             )
 
-    # 7. Mirror each fact to Hindsight
-    unmirrored_count = 0
-    for i, f in enumerate(fact_rows):
+    unmirrored = []
+    for f in fact_rows:
         try:
             retain_fact(f, req.candidate_slug)
             conn.execute("UPDATE facts SET mirrored=1 WHERE fact_id=?", (f["fact_id"],))
             conn.commit()
-            fact_rows[i]["mirrored"] = 1
-        except Exception as e:
-            unmirrored_count += 1
-            print(f"Failed to mirror fact {f['fact_id']}: {e}")
+            f["mirrored"] = 1
+        except Exception:
+            unmirrored.append(f["fact_id"])
+            
+    if unmirrored:
+        print(f"Warning: Failed to mirror facts {unmirrored} to Hindsight")
+        # According to task plan, on failure 502, but data stays in SQLite
+        # "mirror each fact -> on failure 502 (data stays in SQLite)"
+        raise HTTPException(502, detail={"error": "Hindsight mirror failed", "submission_id": submission_id, "unmirrored_fact_ids": unmirrored})
 
-    if unmirrored_count > 0:
-        raise HTTPException(502, detail="Failed to mirror one or more facts to Hindsight")
+    evaluation = evaluate_candidate(req.candidate_slug, conn)
 
-    # 8. Evaluate (stub for now)
-    evaluation = []
-
-    # 9. Return
     return {
         "submission_id": submission_id,
-        "facts": fact_rows,
-        "evaluation": evaluation
+        "facts": [fact_row_to_out(f) for f in fact_rows],
+        "evaluation": evaluation.competency_analyses if hasattr(evaluation, 'competency_analyses') else evaluation["competency_analyses"],
     }
+
+@app.get("/candidates/{slug}/evaluation")
+def get_evaluation(slug: str):
+    conn = get_connection()
+    _check_candidate_exists(slug, conn)
+    return evaluate_candidate(slug, conn)
+
+@app.get("/candidates/{slug}/briefing")
+def get_briefing(slug: str, for_round: int):
+    conn = get_connection()
+    _check_candidate_exists(slug, conn)
+    return briefing(slug, for_round, conn)
+
+@app.get("/candidates/{slug}/disagreements")
+def get_disagreements(slug: str):
+    conn = get_connection()
+    _check_candidate_exists(slug, conn)
+    rows = conn.execute("SELECT * FROM disagreements WHERE candidate_slug=?", (slug,)).fetchall()
+    result = []
+    for d in rows:
+        transitions = conn.execute(
+            "SELECT * FROM transitions WHERE disagreement_id=? ORDER BY created_at",
+            (d["disagreement_id"],)
+        ).fetchall()
+        fact_a = conn.execute("SELECT * FROM facts WHERE fact_id=?", (d["fact_a_id"],)).fetchone()
+        fact_b = conn.execute("SELECT * FROM facts WHERE fact_id=?", (d["fact_b_id"],)).fetchone()
+        result.append({
+            **dict(d),
+            "fact_a": fact_row_to_out(dict(fact_a)),
+            "fact_b": fact_row_to_out(dict(fact_b)),
+            "transitions": [dict(t) for t in transitions],
+        })
+    return result
+
+@app.post("/disagreements/{disagreement_id}/probe-asked")
+def probe_asked(disagreement_id: str):
+    conn = get_connection()
+    try:
+        return mark_probe_asked(disagreement_id, conn)
+    except InvalidTransition as e:
+        raise HTTPException(409, detail={"error": str(e)})
+    except KeyError:
+        raise HTTPException(404, detail={"error": "Disagreement not found"})
+
+@app.post("/disagreements/{disagreement_id}/resolution")
+def post_resolution(disagreement_id: str, req: ResolutionRequest):
+    if len(req.note) < 10:
+        raise HTTPException(400, detail={"error": "note must be at least 10 characters"})
+    conn = get_connection()
+    try:
+        return submit_resolution(
+            disagreement_id, req.resolution_type.value, req.note,
+            req.context_a.value if req.context_a else None,
+            req.context_b.value if req.context_b else None,
+            conn
+        )
+    except InvalidTransition as e:
+        raise HTTPException(409, detail={"error": str(e)})
+    except ValueError as e:
+        raise HTTPException(400, detail={"error": str(e)})
+    except KeyError:
+        raise HTTPException(404, detail={"error": "Disagreement not found"})
+
+@app.post("/candidates/{slug}/finalize")
+def finalize_candidate(slug: str):
+    conn = get_connection()
+    try:
+        return finalize(slug, conn)
+    except ValueError as e:
+        raise HTTPException(409, detail={"error": str(e)})
+
+@app.get("/calibration")
+def get_calibration():
+    from app.calibration import get_calibration_stats
+    conn = get_connection()
+    stats = get_calibration_stats(conn)
+    conn.close()
+    return stats

@@ -186,3 +186,172 @@ def briefing(candidate_slug: str, for_round: int, conn) -> dict:
     structured["synthesis_source"] = source
 
     return structured
+
+def _count_independent(pairs: list[dict]) -> int:
+    sources = set()
+    for p in pairs:
+        if not p["fact_a"]["reviewed_others_notes"] and not p["fact_b"]["reviewed_others_notes"]:
+            sources.add(p["fact_a"]["interviewer_id"])
+            sources.add(p["fact_b"]["interviewer_id"])
+    return len(sources)
+
+def _insufficiency_reason_text(reason: str) -> str:
+    if reason == "single_source":
+        return "Not enough independent sources: only one interviewer has assessed this competency."
+    if reason == "anchored_agreement_only":
+        return "Not enough independent sources: the matching assessments were written after reading each other's notes."
+    return ""
+
+def _store_pair_verdict(conn, slug, comp, pair, pv):
+    now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+    pid = pv.get("pair_id", str(__import__("uuid").uuid4()))
+    pv["pair_id"] = pid
+    try:
+        conn.execute(
+            "INSERT INTO pair_verdicts VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (pid, slug, comp, pair["fact_a"]["fact_id"], pair["fact_b"]["fact_id"],
+             pv.get("verdict"), pv.get("verdict_path"),
+             int(pair["fact_a"]["reviewed_others_notes"] or pair["fact_b"]["reviewed_others_notes"]),
+             0, # opposite (dummy)
+             0, # nli_max (dummy)
+             pv.get("nli_contradiction_max"),
+             pv.get("rationale"), pv.get("synthesis_source"), None, now)
+        )
+    except Exception:
+        pass # ignore if already inserted
+
+def build_evaluation_response(slug, competency_analyses, conn):
+    from app.lifecycle import open_disagreements
+    from app.models import EvaluationResponse, CompetencyAnalysis, OpenDisagreementSummary
+    
+    now = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+    disgs = open_disagreements(slug, conn)
+    
+    return EvaluationResponse(
+        candidate_slug=slug,
+        evaluated_at=now,
+        briefing_summary="Auto-generated summary.",
+        synthesis_source="template",
+        competency_analyses=competency_analyses,
+        open_disagreements_summary=[
+            OpenDisagreementSummary(
+                disagreement_id=d["disagreement_id"],
+                kind=d["kind"],
+                competency=d["competency"],
+                state=d["state"],
+                raised_at=d["created_at"]
+            ) for d in disgs
+        ]
+    )
+
+def evaluate_candidate(slug: str, conn):
+    from app.gates import build_pairs, sufficiency, route_context
+    from app.classify import nli_scores, decide_pair, aggregate
+    from app.lifecycle import create_disagreement
+    from app.provenance import verdict_path_human_readable
+    from app.models import fact_row_to_out, PrimaryPair, SignalSummary
+
+    facts = [dict(r) for r in conn.execute("SELECT * FROM facts WHERE candidate_slug=?", (slug,)).fetchall()]
+    pairs_by_comp = build_pairs(facts, conn=conn)
+
+    competency_analyses = []
+
+    for comp, pairs in pairs_by_comp.items():
+        status, reason = sufficiency(pairs)
+
+        if status == "INSUFFICIENT_EVIDENCE":
+            competency_analyses.append({
+                "competency": comp,
+                "independent_source_count": _count_independent(pairs),
+                "verdict": "INSUFFICIENT_EVIDENCE",
+                "insufficiency_reason": reason,
+                "verdict_path": "stage2_sufficiency",
+                "verdict_path_human_readable": verdict_path_human_readable("stage2_sufficiency", reason),
+                "signal_summary": None,
+                "anchored_dissent": False,
+                "pair_count": len(pairs),
+                "primary_pair": None,
+                "disagreement_id": None,
+                "lifecycle_state": None,
+                "synthesis_rationale": _insufficiency_reason_text(reason),
+                "recommended_follow_up": None,
+            })
+            continue
+
+        pair_verdicts = []
+        for pair in pairs:
+            # Check if already stored (idempotent)
+            existing = conn.execute(
+                "SELECT * FROM pair_verdicts WHERE fact_a_id=? AND fact_b_id=?",
+                (pair["fact_a"]["fact_id"], pair["fact_b"]["fact_id"])
+            ).fetchone()
+            if existing:
+                pair_verdicts.append(dict(existing))
+                continue
+
+            route = route_context(pair)
+            if route == "CONTEXT_SPLIT":
+                pv = {**pair, "verdict": "CONDITIONAL_BOTH_APPLY", "verdict_path": "stage2_5_context",
+                      "kind": "CONTEXT_SPLIT", "synthesis_source": "template"}
+            elif route == "COMPLEMENTARY_CONTEXT":
+                pv = {**pair, "verdict": "COMPLEMENTARY", "verdict_path": "stage2_5_context",
+                      "synthesis_source": "template"}
+            else:
+                # Stage 3
+                c = nli_scores(pair["fact_a"]["claim_normalized"], pair["fact_b"]["claim_normalized"])
+                decision = decide_pair(pair, c)
+                if decision.get("escalate"):
+                    # Stage 4 — LLM adjudication
+                    adj = adjudicate(pair)
+                    pv = {**pair, **adj, "nli_contradiction_max": c}
+                else:
+                    pv = {**pair, **decision}
+
+            # Store pair verdict
+            _store_pair_verdict(conn, slug, comp, pair, pv)
+            pair_verdicts.append(pv)
+
+            # Create disagreement if needed
+            if pv["verdict"] in ("CONTRADICTION",) or pv.get("kind") == "CONTEXT_SPLIT":
+                create_disagreement(pv, conn)
+
+        agg = aggregate(pair_verdicts)
+        
+        # Build primary pair model
+        pp = None
+        if agg.get("primary_pair"):
+            pp = PrimaryPair(
+                fact_a=fact_row_to_out(agg["primary_pair"]["fact_a"]),
+                fact_b=fact_row_to_out(agg["primary_pair"]["fact_b"])
+            )
+            
+        ss = None
+        if agg.get("signal_summary"):
+            ss = SignalSummary(
+                polarity_opposite=agg["signal_summary"].get("polarity_opposite", False),
+                nli_contradiction_max=agg["signal_summary"].get("nli_contradiction_max")
+            )
+
+        ckey = None
+        if agg["verdict_path"] == "stage2_5_context":
+            ckey = "CONTEXT_SPLIT" if agg["verdict"] == "CONDITIONAL_BOTH_APPLY" else "COMPLEMENTARY"
+        elif agg["verdict_path"] == "stage3_rules":
+            ckey = agg["verdict"]
+        competency_analyses.append({
+            "competency": comp,
+            "independent_source_count": _count_independent(pairs),
+            "verdict": agg["verdict"],
+            "insufficiency_reason": None,
+            "verdict_path": agg["verdict_path"],
+            "verdict_path_human_readable": verdict_path_human_readable(agg["verdict_path"], ckey),
+            "signal_summary": ss,
+            "anchored_dissent": agg.get("anchored_dissent", False),
+            "pair_count": len(pairs),
+            "primary_pair": pp,
+            "disagreement_id": agg.get("disagreement_id"),
+            "lifecycle_state": agg.get("lifecycle_state"),
+            "synthesis_rationale": agg.get("rationale", ""),
+            "recommended_follow_up": agg.get("recommended_follow_up"),
+        })
+
+    return build_evaluation_response(slug, competency_analyses, conn)

@@ -57,3 +57,17 @@ def recall_for_candidate(candidate_slug: str, query: str, limit: int = 20) -> li
     client = _client()
     results = client.recall(query=query, bank=bank_name(candidate_slug), limit=limit)
     return results
+
+def retain_outcome(interviewer_id: str, competency: str, rated_negative: int, outcome: str) -> None:
+    client = _client()
+    client.retain(
+        content=f"Outcome for {interviewer_id} on {competency}: {outcome}",
+        bank="interviewer-calibration-global",
+        metadata={
+            "interviewer_id": interviewer_id,
+            "competency": competency,
+            "rated_negative": rated_negative,
+            "outcome": outcome
+        },
+        tags=["type:outcome"]
+    )

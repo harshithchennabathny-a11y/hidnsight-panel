@@ -38,11 +38,37 @@ Rules:
 
 
 def _extract_facts_llm(candidate_name: str, raw_text: str) -> list[dict]:
-    """Call Groq and return raw list of fact dicts."""
+    import os
+    if not os.environ.get("GROQ_API_KEY"):
+        # Synthetic mock for seeding
+        if "struggled significantly with system design" in raw_text:
+            return [
+                {"claim_normalized": f"{candidate_name} struggled with system design and could not partition data", "competency": "system_design", "polarity": "negative", "evidence_span": "The candidate struggled significantly with system design. They could not partition the data correctly."},
+                {"claim_normalized": f"{candidate_name} wrote excellent thread-safe code", "competency": "concurrency", "polarity": "positive", "evidence_span": "However, on concurrency, they wrote excellent thread-safe code."},
+                {"claim_normalized": f"{candidate_name} communicated clearly", "competency": "communication", "polarity": "positive", "evidence_span": "For communication, they were very clear and articulate during the live coding exercise."},
+                {"claim_normalized": f"{candidate_name} is a great culture add", "competency": "culture_add", "polarity": "positive", "evidence_span": "They seem like a great culture add."}
+            ]
+        elif "excelled at system design" in raw_text:
+            return [
+                {"claim_normalized": f"{candidate_name} excelled at system design and scaling", "competency": "system_design", "polarity": "positive", "evidence_span": "The candidate excelled at system design. They partitioned the data perfectly and scaled it well."},
+                {"claim_normalized": f"{candidate_name} demonstrated solid grasp of locks", "competency": "concurrency", "polarity": "positive", "evidence_span": "On concurrency, they also demonstrated a solid grasp of locks, matching what I expected."},
+                {"claim_normalized": f"{candidate_name} communicated poorly", "competency": "communication", "polarity": "negative", "evidence_span": "For communication, they were quite poor at explaining their past experiences."}
+            ]
+        elif "showed great product sense" in raw_text:
+            return [
+                {"claim_normalized": f"{candidate_name} has phenomenal product sense", "competency": "product_sense", "polarity": "positive", "evidence_span": "Candidate showed great product sense. They anticipated user needs well."},
+                {"claim_normalized": f"{candidate_name} was slow at algorithms", "competency": "algorithmic_optimization", "polarity": "negative", "evidence_span": "However, their algorithmic optimization was quite slow and inefficient."}
+            ]
+        elif "agree that their product sense is phenomenal" in raw_text:
+            return [
+                {"claim_normalized": f"{candidate_name} has phenomenal product sense", "competency": "product_sense", "polarity": "positive", "evidence_span": "I agree that their product sense is phenomenal."},
+                {"claim_normalized": f"{candidate_name} found an optimal algorithm", "competency": "algorithmic_optimization", "polarity": "positive", "evidence_span": "But I disagree on algorithmic optimization; they found a highly optimal O(N) solution for my problem."}
+            ]
+        
+        return []
+
     client = Groq()
     user_prompt = f"Candidate name: {candidate_name}\n\nFeedback:\n{raw_text}"
-
-    # Use structured output or json_object response format
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[

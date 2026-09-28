@@ -32,7 +32,8 @@ def create_disagreement(pair_verdict: dict, conn) -> dict:
     """
     from app.memory import retain_transition
 
-    slug = pair_verdict["candidate_slug"]
+    fact_a = pair_verdict["fact_a"]
+    slug = pair_verdict.get("candidate_slug", fact_a["candidate_slug"])
     comp = pair_verdict["competency"]
     kind = pair_verdict.get("kind", "CONTRADICTION")
     fact_a = pair_verdict["fact_a"]
