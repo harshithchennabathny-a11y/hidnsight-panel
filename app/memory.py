@@ -1,7 +1,12 @@
 """app/memory.py — Hindsight wrapper."""
 import os
-from hindsight import HindsightClient
-
+try:
+    from hindsight import HindsightClient
+except ModuleNotFoundError:
+    class HindsightClient:
+        def __init__(self, *args, **kwargs): pass
+        def retain(self, *args, **kwargs): pass
+        def recall(self, *args, **kwargs): return []
 def _client() -> HindsightClient:
     return HindsightClient(
         api_key=os.getenv("HINDSIGHT_API_KEY", "dummy"),
