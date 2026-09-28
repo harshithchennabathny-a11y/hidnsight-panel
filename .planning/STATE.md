@@ -57,3 +57,20 @@
 | Phase 9 â€” Hardening | not_started | â€” |
 | Phase 10 â€” Baseline Comparison (STRETCH) | not_started | â€” |
 | Phase 11 â€” Calibration (CUT FIRST) | not_started | â€” |
+
+## Phase plan index (all written)
+
+| Phase | PLAN.md | Status |
+|---|---|---|
+| 0 — Scaffold + Smoke | phase-0/PLAN.md | planned |
+| 1 — Data Model | phase-1/PLAN.md | planned |
+| 2 — Ingestion | phase-2/PLAN.md | planned |
+| 3 — Gates | phase-3/PLAN.md | planned |
+| 4 — NLI | phase-4/PLAN.md | planned |
+| 5 — Synthesis | phase-5/PLAN.md | planned |
+| 6 — Lifecycle | phase-6/PLAN.md | planned |
+| 7 — API + UI | phase-7/PLAN.md | planned |
+| 8 — Seed + Demo | phase-8/PLAN.md | planned |
+| 9 — Hardening | phase-9/PLAN.md | planned |
+| 10 — Baselines | phase-10/PLAN.md | stretch |
+| 11 — Calibration | phase-11/PLAN.md | cut-first |
