@@ -1,61 +1,51 @@
-"""app/classify.py — Stage 3: NLI Classification + Calibration."""
+"""app/classify.py — Stage 3: NLI Classification.
+
+The NLI model is loaded ONCE at module import time (not per request).
+No mock fallback: raises ImportError / RuntimeError if sentence_transformers
+or the model weights are unavailable (R6).
+
+Label order is asserted from the model config, not hardcoded (R spec).
+"""
 from app.thresholds import NLI_CONTRADICTION_HIGH as HIGH, NLI_CONTRADICTION_LOW as LOW
 from app.thresholds import VERDICT_SEVERITY
 
-try:
-    from sentence_transformers import CrossEncoder
-    HAS_SENTENCE_TRANSFORMERS = True
-except ImportError:
-    HAS_SENTENCE_TRANSFORMERS = False
+from sentence_transformers import CrossEncoder
 
-_MODEL = None
+# ── Load model once at startup ──────────────────────────────────────────────
+_MODEL: CrossEncoder = CrossEncoder("cross-encoder/nli-deberta-v3-xsmall")
 
-class MockModelConfig:
-    id2label = {0: "contradiction", 1: "entailment", 2: "neutral"}
+# Assert label order from the model config (AGENTS.md requirement).
+_LABELS = _MODEL.config.id2label
+assert _LABELS[0] == "contradiction", (
+    f"Expected contradiction at index 0, got {_LABELS}"
+)
+assert _LABELS[1] == "entailment", (
+    f"Expected entailment at index 1, got {_LABELS}"
+)
+assert _LABELS[2] == "neutral", (
+    f"Expected neutral at index 2, got {_LABELS}"
+)
+# ────────────────────────────────────────────────────────────────────────────
 
-class MockCrossEncoder:
-    def __init__(self, name):
-        self.config = MockModelConfig()
-    
-    def predict(self, pairs, apply_softmax=False):
-        # Deterministic mock responses based on length for tests/calibration
-        res = []
-        for a, b in pairs:
-            # simple hashing trick for consistent output between 0 and 1
-            h = (hash(a) + hash(b)) % 100 / 100.0
-            res.append([h, 0.5, 0.5])
-        return res
-
-def _get_model():
-    global _MODEL
-    if _MODEL is None:
-        if HAS_SENTENCE_TRANSFORMERS:
-            _MODEL = CrossEncoder("cross-encoder/nli-deberta-v3-xsmall")
-        else:
-            _MODEL = MockCrossEncoder("mock-model")
-            
-        labels = _MODEL.config.id2label
-        assert labels[0] == "contradiction", f"Expected contradiction at index 0, got {labels}"
-        assert labels[1] == "entailment",    f"Expected entailment at index 1, got {labels}"
-        assert labels[2] == "neutral",       f"Expected neutral at index 2, got {labels}"
-    return _MODEL
 
 def nli_scores(claim_a: str, claim_b: str) -> float:
     """
     Run NLI in both directions. Return max contradiction probability.
-    Contradiction label is index 0 per model config (asserted above).
+    Contradiction label is index 0 (asserted above).
     """
-    model = _get_model()
-    scores_ab = model.predict([(claim_a, claim_b)], apply_softmax=True)[0]
-    scores_ba = model.predict([(claim_b, claim_a)], apply_softmax=True)[0]
+    scores_ab = _MODEL.predict([(claim_a, claim_b)], apply_softmax=True)[0]
+    scores_ba = _MODEL.predict([(claim_b, claim_a)], apply_softmax=True)[0]
     c_ab = float(scores_ab[0])
     c_ba = float(scores_ba[0])
     return max(c_ab, c_ba)
 
+
 def decide_pair(pair: dict, c: float) -> dict:
     """
     Apply decision table rules 3 (and signal for rule 4 escalation).
-    Returns dict with keys: verdict, verdict_path, escalate (bool), nli_contradiction_max.
+    Returns dict with keys: verdict, verdict_path, escalate (bool),
+    nli_contradiction_max.
+    Pure function — no network calls (R4).
     """
     pa = pair["fact_a"]["polarity"]
     pb = pair["fact_b"]["polarity"]
@@ -70,7 +60,13 @@ def decide_pair(pair: dict, c: float) -> dict:
 
     if opposite:
         if c >= HIGH:
-            result.update({"verdict": "CONTRADICTION", "verdict_path": "stage3_rules", "escalate": False})
+            result.update(
+                {
+                    "verdict": "CONTRADICTION",
+                    "verdict_path": "stage3_rules",
+                    "escalate": False,
+                }
+            )
         else:
             result.update({"escalate": True})
         return result
@@ -81,17 +77,29 @@ def decide_pair(pair: dict, c: float) -> dict:
     elif LOW <= c < HIGH:
         result.update({"escalate": True})
     else:  # c < LOW
-        result.update({"verdict": "COMPLEMENTARY", "verdict_path": "stage3_rules", "escalate": False})
+        result.update(
+            {
+                "verdict": "COMPLEMENTARY",
+                "verdict_path": "stage3_rules",
+                "escalate": False,
+            }
+        )
 
     return result
+
 
 def aggregate(pair_verdicts: list[dict]) -> dict:
     """
     Returns {verdict, verdict_path, primary_pair} for the competency.
-    Highest severity wins. Tie-break: most recent round (max of fact_a.round, fact_b.round).
+    Highest severity wins. Tie-break: most recent round (max of fact_a.round,
+    fact_b.round).
     """
     if not pair_verdicts:
-        return {"verdict": "INSUFFICIENT_EVIDENCE", "verdict_path": "stage2_sufficiency", "primary_pair": None}
+        return {
+            "verdict": "INSUFFICIENT_EVIDENCE",
+            "verdict_path": "stage2_sufficiency",
+            "primary_pair": None,
+        }
 
     def severity(pv):
         return VERDICT_SEVERITY.get(pv.get("verdict", "COMPLEMENTARY"), 0)

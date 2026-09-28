@@ -1,73 +1,143 @@
-"""app/memory.py — Hindsight wrapper."""
-import os
-try:
-    from hindsight import HindsightClient
-except ModuleNotFoundError:
-    class HindsightClient:
-        def __init__(self, *args, **kwargs): pass
-        def retain(self, *args, **kwargs): pass
-        def recall(self, *args, **kwargs): return []
-def _client() -> HindsightClient:
-    return HindsightClient(
-        api_key=os.getenv("HINDSIGHT_API_KEY", "dummy"),
-        base_url=os.getenv("HINDSIGHT_BASE_URL", "dummy")
-    )
+"""app/memory.py — Hindsight wrapper (real integration).
+
+All calls use the verified Hindsight SDK signatures:
+  retain(bank_id, content, *, metadata, tags)
+  retain_batch(bank_id, items)
+  recall(bank_id, query, *, max_tokens, tags)
+  reflect(bank_id, query, *)
+
+Never falls back to mock data. Raises on any failure (R6).
+API key is read only via app/config.hindsight_client() (R key rule).
+"""
+from app.config import hindsight_client
+
 
 def bank_name(candidate_slug: str) -> str:
     return f"hiring-candidate-{candidate_slug}"
 
+
 def retain_fact(fact: dict, candidate_slug: str) -> None:
-    """Retain a fact to the candidate's Hindsight bank. Raises on failure."""
-    client = _client()
+    """Retain a single fact to the candidate's Hindsight bank.
+
+    Raises on failure — caller must set mirrored=false on error (R3).
+    """
+    client = hindsight_client()
     client.retain(
-        content=fact["claim_normalized"],
-        bank=bank_name(candidate_slug),
+        bank_name(candidate_slug),
+        fact["claim_normalized"],
         metadata={
             "candidate": candidate_slug,
             "interviewer": fact["interviewer_id"],
-            "round": fact["round"],
+            "round": str(fact["round"]),
             "competency": fact["competency"],
             "fact_id": fact["fact_id"],
         },
         tags=["type:fact"],
     )
 
-def retain_transition(disagreement_id: str, state: str, note: str, candidate_slug: str) -> None:
-    """Retain a lifecycle transition."""
-    client = _client()
+
+def retain_facts_batch(facts: list[dict], candidate_slug: str) -> None:
+    """Retain multiple facts in one batch call.
+
+    Raises on failure. Use this after a submission so all facts for one
+    submission are sent in a single network round-trip (spec §6.1 step 6).
+    """
+    if not facts:
+        return
+    client = hindsight_client()
+    items = [
+        {
+            "content": f["claim_normalized"],
+            "metadata": {
+                "candidate": candidate_slug,
+                "interviewer": f["interviewer_id"],
+                "round": str(f["round"]),
+                "competency": f["competency"],
+                "fact_id": f["fact_id"],
+            },
+            "tags": ["type:fact"],
+        }
+        for f in facts
+    ]
+    client.retain_batch(bank_name(candidate_slug), items)
+
+
+def retain_transition(
+    disagreement_id: str, state: str, note: str, candidate_slug: str
+) -> None:
+    """Retain a lifecycle transition. Raises on failure."""
+    client = hindsight_client()
+    content = (
+        f"Disagreement {disagreement_id} moved to {state}. {note or ''}".strip()
+    )
     client.retain(
-        content=f"Disagreement {disagreement_id} moved to {state}. {note or ''}".strip(),
-        bank=bank_name(candidate_slug),
+        bank_name(candidate_slug),
+        content,
         metadata={"disagreement_id": disagreement_id, "state": state},
         tags=["type:transition"],
     )
 
-def retain_resolution(disagreement_id: str, note: str, candidate_slug: str) -> None:
-    """Retain a resolution note."""
-    client = _client()
+
+def retain_resolution(
+    disagreement_id: str, note: str, candidate_slug: str
+) -> None:
+    """Retain a resolution note. Raises on failure."""
+    client = hindsight_client()
     client.retain(
-        content=note,
-        bank=bank_name(candidate_slug),
+        bank_name(candidate_slug),
+        note,
         metadata={"disagreement_id": disagreement_id},
         tags=["type:resolution"],
     )
 
-def recall_for_candidate(candidate_slug: str, query: str, limit: int = 20) -> list:
-    """Recall relevant facts for a candidate via semantic search."""
-    client = _client()
-    results = client.recall(query=query, bank=bank_name(candidate_slug), limit=limit)
-    return results
 
-def retain_outcome(interviewer_id: str, competency: str, rated_negative: int, outcome: str) -> None:
-    client = _client()
+def recall_for_candidate(
+    candidate_slug: str, query: str, max_tokens: int = 4096
+) -> object:
+    """Recall relevant facts for a candidate via semantic search.
+
+    Returns the RecallResponse object from Hindsight.
+    Raises on failure.
+    """
+    client = hindsight_client()
+    return client.recall(
+        bank_name(candidate_slug),
+        query,
+        max_tokens=max_tokens,
+        tags=["type:fact"],
+    )
+
+
+def reflect_for_briefing(
+    candidate_slug: str, query: str, context: str | None = None
+) -> str:
+    """Run Hindsight reflect to produce an LLM-generated overview.
+
+    Returns the response text. Raises on failure.
+    """
+    client = hindsight_client()
+    resp = client.reflect(
+        bank_name(candidate_slug),
+        query,
+        context=context,
+        budget="low",
+    )
+    return resp.text
+
+
+def retain_outcome(
+    interviewer_id: str, competency: str, rated_negative: int, outcome: str
+) -> None:
+    """Retain a post-hire outcome record to the calibration bank."""
+    client = hindsight_client()
     client.retain(
-        content=f"Outcome for {interviewer_id} on {competency}: {outcome}",
-        bank="interviewer-calibration-global",
+        "interviewer-calibration-global",
+        f"Outcome for {interviewer_id} on {competency}: {outcome}",
         metadata={
             "interviewer_id": interviewer_id,
             "competency": competency,
-            "rated_negative": rated_negative,
-            "outcome": outcome
+            "rated_negative": str(rated_negative),
+            "outcome": outcome,
         },
-        tags=["type:outcome"]
+        tags=["type:outcome"],
     )

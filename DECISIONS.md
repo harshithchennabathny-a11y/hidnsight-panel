@@ -9,6 +9,8 @@ Verified from `hindsight-client`:
 
 ## 2. LLM Model Selection
 - Groq model: `openai/gpt-oss-120b` (or `qwen/qwen3-32b` fallback if structured output fails).
+- `openai/gpt-oss-120b` reasoning model configuration in `app/synthesis.py`: `max_tokens` set to 1500 (>= 1500), `reasoning_effort` set to `"low"` via dynamic Groq SDK capability check.
+- Validates that returned message content is non-empty, raising a clear `RuntimeError` on empty response rather than passing an empty string or falling back to mock output.
 - JSON mode and pydantic schema validation used for structured output extractions and adjudications.
 
 ## 3. Threshold Calibration

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -13,7 +14,7 @@ from app.models import (
     fact_row_to_out
 )
 from app.ingest import extract_and_validate, build_fact_rows
-from app.memory import retain_fact
+from app.memory import retain_facts_batch
 from app.synthesis import briefing, evaluate_candidate
 from app.lifecycle import mark_probe_asked, submit_resolution, finalize, InvalidTransition
 
@@ -32,14 +33,9 @@ def _check_candidate_exists(slug: str, conn):
     if not conn.execute("SELECT 1 FROM candidates WHERE slug=?", (slug,)).fetchone():
         raise HTTPException(404, detail="Candidate not found")
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def root():
-    return {
-        "status": "online",
-        "app": "Panel API",
-        "docs_url": "/docs",
-        "endpoints": ["/candidates", "/submissions", "/docs"]
-    }
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/candidates", response_model=list[CandidateListItem])
@@ -115,21 +111,22 @@ def post_submission(req: SubmissionRequest):
                  f["reviewed_others_notes"], 0, f["created_at"])
             )
 
-    unmirrored = []
-    for f in fact_rows:
-        try:
-            retain_fact(f, req.candidate_slug)
+    # Mirror all facts to Hindsight in one batch — raises 502 on failure (R6)
+    try:
+        retain_facts_batch(fact_rows, req.candidate_slug)
+        for f in fact_rows:
             conn.execute("UPDATE facts SET mirrored=1 WHERE fact_id=?", (f["fact_id"],))
-            conn.commit()
-            f["mirrored"] = 1
-        except Exception:
-            unmirrored.append(f["fact_id"])
-            
-    if unmirrored:
-        print(f"Warning: Failed to mirror facts {unmirrored} to Hindsight")
-        # According to task plan, on failure 502, but data stays in SQLite
-        # "mirror each fact -> on failure 502 (data stays in SQLite)"
-        raise HTTPException(502, detail={"error": "Hindsight mirror failed", "submission_id": submission_id, "unmirrored_fact_ids": unmirrored})
+        conn.commit()
+    except Exception as e:
+        unmirrored = [f["fact_id"] for f in fact_rows]
+        raise HTTPException(
+            502,
+            detail={
+                "error": f"Hindsight mirror failed: {e}",
+                "submission_id": submission_id,
+                "unmirrored_fact_ids": unmirrored,
+            },
+        )
 
     evaluation = evaluate_candidate(req.candidate_slug, conn)
 

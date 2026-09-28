@@ -99,8 +99,7 @@ def build_pairs(facts: list[dict], conn=None) -> dict[str, list[dict]]:
             pairs.sort(key=lambda p: max(p["fact_a"]["round"], p["fact_b"]["round"]), reverse=True)
             pairs = pairs[:15]
             
-        if pairs:
-            result[comp] = pairs
+        result[comp] = pairs
 
     return result
 

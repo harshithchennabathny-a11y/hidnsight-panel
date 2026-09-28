@@ -1,0 +1,32 @@
+﻿app\gates.py:38:     for comp, comp_facts in grouped.items():
+app\gates.py:45:         for ivr, ivr_facts in by_interviewer.items():
+app\ingest.py:85:     for k, v in fact.items():
+app\ingest.py:103:     content = response.choices[0].message.content
+app\memory.py:125:     return resp.text
+app\synthesis.py:79:     if not response or not response.choices:
+app\synthesis.py:82:     content = response.choices[0].message.content
+app\synthesis.py:84:         finish_reason = getattr(response.choices[0], "finish_reason", "unknown")
+app\synthesis.py:236:     for comp, entries in findings_by_comp.items():
+app\synthesis.py:336:             {"competency": c, "claims": v} for c, v in findings_by_comp.items()
+app\synthesis.py:471:     for comp, pairs in pairs_by_comp.items():
+tests\conftest.py:17:     .results: List[RecallResult]          ΓåÉ NOT .items
+tests\conftest.py:19:     .id: str, .text: str, .metadata: Optional[Dict[str,str]], .tags: Optional[List[str]]
+tests\conftest.py:21:     .text: str                             ΓåÉ NOT .response
+tests\conftest.py:117:         .results: List[RecallResult]
+tests\conftest.py:120:         .text: str          ΓåÉ the claim_normalized text
+tests\conftest.py:124:     The real Hindsight client iterates response.results in app/memory.py
+tests\conftest.py:128:     resp.results = [
+tests\conftest.py:131:             text=f.get("claim_normalized", ""),   # real field is .text
+tests\conftest.py:153:         .text: str   ΓåÉ NOT .response (which does not exist on the real type)
+tests\conftest.py:155:     Note: app/memory.py reflect_for_briefing was also corrected to read .text
+tests\conftest.py:156:     (was incorrectly reading .response ΓÇö production bug caught during this audit).
+tests\conftest.py:159:     resp.text = summary      # real field is .text
+tests\conftest.py:171:       .reflect.return_value         ΓÇô MagicMock with .response = "" (override per test)
+tests\test_synthesis.py:56:     mock_choice.message.content = '{"verdict": "CONTRADICTION"}'
+tests\test_synthesis.py:57:     mock_choice.finish_reason = "stop"
+tests\test_synthesis.py:75:     mock_choice.message.content = "   "
+tests\test_synthesis.py:76:     mock_choice.finish_reason = "length"
+tests\test_validation_fixtures.py:485:     mock_choice.message.content = json.dumps({
+tests\test_validation_fixtures.py:489:     mock_choice.finish_reason = "stop"
+tests\test_validation_fixtures.py:490:     mock_llm_response.choices = [mock_choice]
+baseline_comparison\run_baselines.py:68:                 response_text = response.choices[0].message.content

@@ -79,11 +79,8 @@ def create_disagreement(pair_verdict: dict, conn) -> dict:
     )
     conn.commit()
 
-    # Mirror to Hindsight
-    try:
-        retain_transition(disagreement_id, "RAISED", "Disagreement detected", slug)
-    except Exception as e:
-        print(f"WARNING: Hindsight retain failed for transition {transition_id}: {e}")
+    # Mirror to Hindsight — raises on failure per R6 (caller sees 502)
+    retain_transition(disagreement_id, "RAISED", "Disagreement detected", slug)
 
     return dict(conn.execute(
         "SELECT * FROM disagreements WHERE disagreement_id=?", (disagreement_id,)
@@ -140,10 +137,8 @@ def submit_resolution(
     _write_transition(disagreement_id, row["state"], to_state, note, conn)
     _update_state(disagreement_id, to_state, conn)
 
-    try:
-        retain_resolution(disagreement_id, note, row["candidate_slug"])
-    except Exception as e:
-        print(f"WARNING: Hindsight retain failed for resolution: {e}")
+    # Mirror to Hindsight — raises on failure per R6 (caller sees 502)
+    retain_resolution(disagreement_id, note, row["candidate_slug"])
 
     return _get_or_404(disagreement_id, conn)
 
@@ -192,11 +187,25 @@ def finalize(candidate_slug: str, conn) -> dict:
         "SELECT * FROM disagreements WHERE candidate_slug=?", (candidate_slug,)
     ).fetchall()
 
+    still_open_list = [
+        {
+            "disagreement_id": d["disagreement_id"],
+            "kind": d["kind"],
+            "competency": d["competency"],
+            "state": d["state"],
+            "raised_at": d["created_at"],
+        }
+        for d in all_disgs
+        if d["state"] == "STILL_OPEN"
+    ]
+
     return {
         "candidate_slug": candidate_slug,
         "finalized_at": now,
         "disagreements": [dict(d) for d in all_disgs],
-        "still_open_count": sum(1 for d in all_disgs if d["state"] == "STILL_OPEN"),
+        "open_contradictions_summary": still_open_list,
+        "open_disagreements_summary": still_open_list,
+        "still_open_count": len(still_open_list),
         "resolved_count": sum(1 for d in all_disgs if d["state"] == "RESOLVED"),
     }
 
@@ -223,11 +232,13 @@ def _write_transition(disagreement_id, from_state, to_state, note, conn):
         (tid, disagreement_id, from_state, to_state, note, now)
     )
     conn.commit()
-    try:
-        d = conn.execute("SELECT candidate_slug FROM disagreements WHERE disagreement_id=?", (disagreement_id,)).fetchone()
+    # Mirror to Hindsight — raises on failure per R6
+    d = conn.execute(
+        "SELECT candidate_slug FROM disagreements WHERE disagreement_id=?",
+        (disagreement_id,)
+    ).fetchone()
+    if d:
         retain_transition(disagreement_id, to_state, note, d["candidate_slug"])
-    except Exception:
-        pass
 
 def _update_state(disagreement_id, new_state, conn):
     now = datetime.utcnow().isoformat() + "Z"

@@ -4,11 +4,12 @@ import LifecycleChip from './LifecycleChip';
 import ClaimPair from './ClaimPair';
 
 function insufficiencyText(reason) {
+  // Spec §9 exact text
   if (reason === 'single_source') {
-    return "Not enough independent sources: only one interviewer has assessed this competency.";
+    return 'Only one interviewer has given feedback on this competency, so no comparison is possible.';
   }
   if (reason === 'anchored_agreement_only') {
-    return "Not enough independent sources: the matching assessments were written after reading each other's notes.";
+    return "The interviewers who agree here had read each other\u2019s notes, so their agreement is not counted as independent confirmation.";
   }
   return reason;
 }

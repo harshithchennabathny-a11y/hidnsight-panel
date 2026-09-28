@@ -96,11 +96,18 @@ class OpenDisagreementSummary(BaseModel):
 class EvaluationResponse(BaseModel):
     """Full output contract for GET /candidates/{slug}/evaluation."""
     candidate_slug: str
+    display_name: str = ""               # populated from candidates table for UI header
+    status: CandidateStatus = "open"     # populated from candidates table for UI chip
     evaluated_at: str                      # ISO-8601
     briefing_summary: str
     synthesis_source: SynthesisSource
     competency_analyses: list[CompetencyAnalysis]
     open_disagreements_summary: list[OpenDisagreementSummary]
+
+    @property
+    def open_contradictions_summary(self) -> list[OpenDisagreementSummary]:
+        """Alias for open_disagreements_summary matching legacy specification terminology."""
+        return self.open_disagreements_summary
 
 
 class CandidateListItem(BaseModel):
