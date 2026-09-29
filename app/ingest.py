@@ -107,8 +107,26 @@ def _extract_facts_llm(candidate_name: str, raw_text: str) -> list[dict]:
 
 
 def _validate_spans(facts: list[dict], raw_text: str) -> list[dict]:
-    """Return list of facts with invalid spans (evidence_span not in raw_text)."""
-    return [f for f in facts if f["evidence_span"] not in raw_text]
+    """Return list of facts with invalid spans (evidence_span not a substring of raw_text).
+    
+    LOOPHOLE FIX #6: Check case-insensitively first, then exact match.
+    If the span exists case-insensitively but not exactly, attempt to find the
+    correct-casing version in raw_text and correct the fact in-place.
+    Only flag as invalid if the span is not present even case-insensitively.
+    """
+    raw_lower = raw_text.lower()
+    bad = []
+    for f in facts:
+        span = f["evidence_span"]
+        if span in raw_text:
+            continue  # exact match — all good
+        if span.lower() in raw_lower:
+            # Case mismatch — find and fix the exact casing from raw_text
+            idx = raw_lower.index(span.lower())
+            f["evidence_span"] = raw_text[idx: idx + len(span)]
+        else:
+            bad.append(f)
+    return bad
 
 
 def extract_and_validate(candidate_name: str, raw_text: str) -> list[dict]:

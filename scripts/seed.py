@@ -191,8 +191,8 @@ def seed_candidate_b():
     )
     post_submission(sub2)
     print("  Round 2 submitted.")
-    print("  Candidate B: product_sense → anchored_agreement_only; "
-          "algorithmic_optimization → anchored_dissent (CONTRADICTION or INSUFFICIENT_EVIDENCE).")
+    print("  Candidate B: product_sense -> anchored_agreement_only; "
+          "algorithmic_optimization -> anchored_dissent (CONTRADICTION or INSUFFICIENT_EVIDENCE).")
 
 
 # ---------------------------------------------------------------------------

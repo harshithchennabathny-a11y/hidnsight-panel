@@ -14,7 +14,10 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+
+from groq.types.chat import ChatCompletion, ChatCompletionMessage
+from groq.types.chat.chat_completion import Choice
 
 import pytest
 
@@ -480,13 +483,15 @@ def test_fixture_09_ambiguous_nli_case_escalates_to_stage4():
         reviewed_others_notes=False,
     )
 
-    mock_llm_response = MagicMock()
-    mock_choice = MagicMock()
-    mock_choice.message.content = json.dumps({
+    mock_msg = Mock(spec=ChatCompletionMessage)
+    mock_msg.content = json.dumps({
         "verdict": "CONTRADICTION",
         "rationale": "Claim A (interviewer_a, round 1) and Claim B (interviewer_b, round 2) directly conflict on concurrency approach."
     })
+    mock_choice = Mock(spec=Choice)
+    mock_choice.message = mock_msg
     mock_choice.finish_reason = "stop"
+    mock_llm_response = Mock(spec=ChatCompletion)
     mock_llm_response.choices = [mock_choice]
 
     mock_groq_client = MagicMock()

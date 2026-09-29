@@ -12,7 +12,7 @@ export const getCandidates = () => fetch(`${BASE}/candidates`).then(handle);
 export const postSubmission = (body) =>
   fetch(`${BASE}/submissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(handle);
 export const getEvaluation = (slug) => fetch(`${BASE}/candidates/${slug}/evaluation`).then(handle);
-export const getBriefing = (slug, forRound) => fetch(`${BASE}/candidates/${slug}/briefing?for_round=${forRound}`).then(handle);
+export const getBriefing = (slug, forRound, useMemory = true) => fetch(`${BASE}/candidates/${slug}/briefing?for_round=${forRound}&use_memory=${useMemory}`).then(handle);
 export const getDisagreements = (slug) => fetch(`${BASE}/candidates/${slug}/disagreements`).then(handle);
 export const postProbeAsked = (id) => fetch(`${BASE}/disagreements/${id}/probe-asked`, { method: 'POST' }).then(handle);
 export const postResolution = (id, body) =>

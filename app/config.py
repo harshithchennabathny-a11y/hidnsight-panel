@@ -22,14 +22,20 @@ USE_MOCKS = os.getenv("PANEL_USE_MOCKS", "false").lower() == "true"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
-@lru_cache(maxsize=1)
+import threading
+
+_thread_local = threading.local()
+
+
 def hindsight_client():
-    from hindsight_client import Hindsight
-    return Hindsight(
-        base_url=os.getenv("HINDSIGHT_BASE_URL", "https://api.hindsight.vectorize.io"),
-        api_key=_require("HINDSIGHT_API_KEY"),
-        timeout=60.0,
-    )
+    if not hasattr(_thread_local, "client"):
+        from hindsight_client import Hindsight
+        _thread_local.client = Hindsight(
+            base_url=os.getenv("HINDSIGHT_BASE_URL", "https://api.hindsight.vectorize.io"),
+            api_key=_require("HINDSIGHT_API_KEY"),
+            timeout=60.0,
+        )
+    return _thread_local.client
 
 
 @lru_cache(maxsize=1)
